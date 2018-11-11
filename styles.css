@@ -171,7 +171,7 @@ div.main pre {
 /* IMAGES */
 
 img {
-	max-width: 100%; 
+    	max-width: 100%; 
 	display:block; 
 	height: auto;
 	border: 2px solid gray;
